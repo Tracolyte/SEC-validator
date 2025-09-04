@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SEC Filing Validator (EDGAR Published Date)</title>
+  <style>
+    :root {
+      --primary-color:#003566; --secondary-color:#0066cc; --background-color:#f4f7f9;
+      --card-background:#ffffff; --text-color:#333; --border-color:#dde4e8;
+      --success-color:#28a745; --success-background:#e9f6ec;
+      --error-color:#dc3545; --error-background:#f8d7da;
+      --warning-color:#ffc107; --warning-background:#fff8e1;
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--background-color);color:var(--text-color);margin:0;padding:2rem;display:flex;flex-direction:column;align-items:center}
+    .container{width:100%;max-width:980px;background:var(--card-background);padding:2rem;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.08)}
+    h1{color:var(--primary-color);text-align:center;margin-top:0}
+    .instructions{background:#e7f3ff;border-left:4px solid var(--secondary-color);padding:1rem;margin-bottom:2rem;border-radius:8px}
+    .instructions p{margin:0;line-height:1.5}
+    #document-inputs{display:flex;flex-direction:column;gap:2rem}
+    .document-entry{border:1px solid var(--border-color);border-radius:8px;padding:1.25rem;transition:box-shadow .2s}
+    .document-entry:focus-within{box-shadow:0 0 0 2px var(--secondary-color)}
+    .input-group{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .input-group label{font-weight:600;margin-right:.5rem;color:var(--primary-color);min-width:160px}
+    .input-group input[type="url"]{flex:1 1 420px;padding:.75rem;border:1px solid var(--border-color);border-radius:6px;font-size:1rem;transition:border-color .2s}
+    .input-group input[type="url"]:focus{outline:none;border-color:var(--secondary-color)}
+    button{padding:.75rem 1rem;font-size:1rem;font-weight:600;border:none;border-radius:6px;cursor:pointer;transition:background-color .15s,transform .05s}
+    button:active{transform:translateY(1px)}
+    .verify-btn{background:var(--secondary-color);color:#fff;white-space:nowrap}
+    .verify-btn:hover{background:var(--primary-color)}
+    .verify-btn:disabled{background:#a0a0a0;cursor:not-allowed}
+    .result-area{margin-top:1rem;padding:1rem;border-radius:8px;border:1px solid transparent}
+    .result-area.hidden{display:none}
+    .result-area.valid{background:var(--success-background);border-color:var(--success-color)}
+    .result-area.invalid{background:var(--error-background);border-color:var(--error-color)}
+    .result-banner{font-weight:700;font-size:1.1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem}
+    .result-banner.valid-banner{color:var(--success-color)}
+    .result-banner.invalid-banner{color:var(--error-color)}
+    .result-details{display:grid;grid-template-columns:1fr;gap:.75rem}
+    .detail-item{display:flex;align-items:flex-start;gap:.5rem;word-break:break-all;flex-wrap:wrap}
+    .detail-item strong{white-space:nowrap;min-width:160px}
+    .inline-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .copy-btn{background:#e9ecef;color:#495057;padding:.35rem .6rem;font-size:.8rem;border-radius:6px}
+    .copy-btn:hover{background:#ced4da}
+    .action-btn{background:var(--primary-color);color:#fff;text-decoration:none;text-align:center;padding:.6rem .8rem;border-radius:6px;display:inline-block}
+    .action-btn:hover{background:#00274d}
+    #add-doc-btn{margin-top:2rem;background:var(--success-color);color:#fff;width:100%;padding:.9rem}
+    #add-doc-btn:hover{background:#218838}
+    .badge{display:inline-block;padding:.25rem .5rem;border:1px solid var(--border-color);border-radius:999px;font-size:.75rem;background:#f9fbfc}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SEC Filing Validator</h1>
+    <div class="instructions">
+      <p><strong>Instructions:</strong> Paste a 10-K or 10-Q SEC link. The document must be <strong>published on or after October 1, 2023</strong> (based on EDGAR’s <em>Accepted</em> timestamp). We also verify the form type is 10-K/10-Q.</p>
+    </div>
+
+    <div id="document-inputs">
+      <div class="document-entry" id="doc-entry-1">
+        <div class="input-group">
+          <label for="url-input-1">Document 1 Link:</label>
+          <input type="url" id="url-input-1" placeholder="e.g., https://www.sec.gov/ix?doc=/Archives/edgar/data/.../xxxx.htm" class="url-input" />
+          <button class="verify-btn" data-target="1">Verify</button>
+        </div>
+        <div class="result-area hidden" id="result-area-1"></div>
+      </div>
+    </div>
+
+    <button id="add-doc-btn">Add Another Document (for Category C)</button>
+  </div>
+
+  <template id="document-entry-template">
+    <div class="document-entry">
+      <div class="input-group">
+        <label>Document X Link:</label>
+        <input type="url" placeholder="e.g., https://www.sec.gov/ix?doc=/Archives/edgar/data/.../xxxx.htm" class="url-input" />
+        <button class="verify-btn">Verify</button>
+      </div>
+      <div class="result-area hidden"></div>
+    </div>
+  </template>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const documentInputsContainer = document.getElementById('document-inputs');
+      const addDocBtn = document.getElementById('add-doc-btn');
+      const entryTemplate = document.getElementById('document-entry-template');
+
+      let documentCounter = 1;
+      const CUTOFF_DATE = new Date('2023-10-01T00:00:00Z'); // compare against Accepted (UTC)
+
+      documentInputsContainer.addEventListener('click', (event) => {
+        if (event.target.classList.contains('verify-btn')) {
+          const entryId = event.target.dataset.target;
+          const urlInput = document.getElementById(`url-input-${entryId}`);
+          const resultArea = document.getElementById(`result-area-${entryId}`);
+          handleVerification(urlInput, resultArea, event.target);
+        }
+      });
+
+      addDocBtn.addEventListener('click', () => {
+        documentCounter++;
+        const newEntry = entryTemplate.content.cloneNode(true).firstElementChild;
+        const label = newEntry.querySelector('label');
+        const input = newEntry.querySelector('input');
+        const button = newEntry.querySelector('button');
+        const resultArea = newEntry.querySelector('.result-area');
+
+        newEntry.id = `doc-entry-${documentCounter}`;
+        label.htmlFor = `url-input-${documentCounter}`;
+        label.textContent = `Document ${documentCounter} Link:`;
+        input.id = `url-input-${documentCounter}`;
+        button.dataset.target = documentCounter;
+        resultArea.id = `result-area-${documentCounter}`;
+        documentInputsContainer.appendChild(newEntry);
+      });
+
+      async function handleVerification(urlInput, resultArea, verifyButton) {
+        const rawUrl = (urlInput.value || '').trim();
+        verifyButton.disabled = true;
+        verifyButton.textContent = 'Verifying…';
+        setResult(resultArea, null);
+
+        const parsed = parseSecUrl(rawUrl);
+        if (!parsed) {
+          showError(resultArea, 'Invalid SEC link. Use an EDGAR URL that contains /Archives/edgar/data/<CIK>/<ACCESSION>/… (you may include or omit ix?doc=).');
+          return resetBtn(verifyButton);
+        }
+
+        const { cik, accessionNoNoDashes, htmlDocUrl, filingDetailUrl } = parsed;
+
+        try {
+          // NOTE: In browsers, setting the User-Agent header is forbidden.
+          const paddedCik = cik.padStart(10, '0');
+          const apiUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
+          const resp = await fetch(apiUrl, { method: 'GET' });
+          if (!resp.ok) throw new Error(`SEC API error ${resp.status}`);
+          const data = await resp.json();
+
+          // Map recent arrays into objects for easier lookup
+          const recent = data?.filings?.recent;
+          if (!recent || !recent.accessionNumber) {
+            throw new Error('Unexpected SEC API response structure.');
+          }
+
+          const accWithDashes = `${accessionNoNoDashes.slice(0,10)}-${accessionNoNoDashes.slice(10,12)}-${accessionNoNoDashes.slice(12)}`;
+          const idx = recent.accessionNumber.indexOf(accWithDashes);
+          if (idx === -1) {
+            showError(resultArea, 'This accession wasn’t found in recent submissions. Ensure this is a recent 10-K/10-Q (Oct 2023+).');
+            return resetBtn(verifyButton);
+          }
+
+          const form = recent.form[idx];
+          const accepted = recent.acceptanceDateTime?.[idx]; // e.g. "2024-11-07T13:02:51.000Z"
+          const filingDate = recent.filingDate?.[idx];      // e.g. "2024-11-07"
+          const reportDate = recent.reportDate?.[idx] || '';
+          const companyName = data.name;
+          const accessionDashed = recent.accessionNumber[idx];
+
+          // Enforce 10-K / 10-Q only
+          const is10KQ = form === '10-K' || form === '10-Q';
+          if (!is10KQ) {
+            showError(resultArea, `Form type is ${form}. Only 10-K and 10-Q are allowed.`);
+            return resetBtn(verifyButton);
+          }
+
+          // Use Accepted timestamp as Published date
+          const acceptedDate = accepted ? new Date(accepted) : (filingDate ? new Date(filingDate + 'T00:00:00Z') : null);
+          if (!acceptedDate) {
+            showError(resultArea, 'Could not read the EDGAR “Accepted” timestamp for this filing.');
+            return resetBtn(verifyButton);
+          }
+
+          const isValid = acceptedDate >= CUTOFF_DATE;
+
+          renderResult(resultArea, isValid ? 'valid' : 'invalid', {
+            message: isValid ? 'This document is valid for use.' : `This document is too old. Published (Accepted) on ${acceptedDate.toISOString().slice(0,10)} which is before Oct 1, 2023.`,
+            meta: {
+              companyName,
+              form,
+              cik,
+              accessionDashed,
+              reportDate,
+              filingDate,
+              accepted
+            },
+            links: {
+              originalLink: rawUrl,
+              htmlLink: htmlDocUrl,
+              filingDetailUrl
+            }
+          });
+
+        } catch (e) {
+          console.error(e);
+          showError(resultArea, 'Failed to fetch or parse SEC data. Check the link and try again.');
+        } finally {
+          resetBtn(verifyButton);
+        }
+      }
+
+      function parseSecUrl(url) {
+        try {
+          const u = new URL(url);
+          if (!/sec\.gov$/i.test(u.hostname)) return null;
+
+          // Accept both ix?doc=/Archives/... and direct /Archives/... links
+          let archivesPath = '';
+          if (u.pathname.includes('/ix')) {
+            const docParam = u.searchParams.get('doc') || '';
+            archivesPath = docParam;
+          } else {
+            // e.g. https://www.sec.gov/Archives/edgar/data/.../doc.htm
+            archivesPath = u.pathname;
+          }
+          if (!archivesPath.includes('/Archives/edgar/data/')) return null;
+
+          // Extract CIK and the no-dashes accession from the /data/<cik>/<accessionNoNoDashes>/...
+          const m = archivesPath.match(/\/Archives\/edgar\/data\/(\d+)\/(\d{18})\//i);
+          if (!m) return null;
+
+          const cik = m[1];
+          const accessionNoNoDashes = m[2];
+
+          const htmlDocUrl = `https://www.sec.gov${archivesPath.replace(/^https?:\/\/www\.sec\.gov/i, '')}`.replace(/^\/ix\?doc=/, '');
+          const filingDetailUrl = `https://www.sec.gov/Archives/edgar/data/${cik}/${accessionNoNoDashes}/${accessionNoNoDashes.slice(0,10)}-${accessionNoNoDashes.slice(10,12)}-${accessionNoNoDashes.slice(12)}-index.html`;
+
+          return { cik, accessionNoNoDashes, htmlDocUrl, filingDetailUrl };
+        } catch {
+          return null;
+        }
+      }
+
+      function resetBtn(btn){ btn.disabled = false; btn.textContent = 'Verify'; }
+      function setResult(area, html){ area.className = 'result-area' + (html ? '' : ' hidden'); area.innerHTML = html || ''; }
+      function showError(area, msg){ renderResult(area, 'invalid', { message: msg }); }
+
+      function renderResult(resultArea, status, payload) {
+        const isValid = status === 'valid';
+        const bannerClass = isValid ? 'valid-banner' : 'invalid-banner';
+        const icon = isValid
+          ? `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"><path d="M16 8A8 8 0 11.001 8 8 8 0 0116 8zm-3.97-3.03a.75.75 0 00-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 10-1.06 1.06L6.97 11.03a.75.75 0 001.079-.02l3.992-4.99a.75.75 0 00-.01-1.05z"/></svg>`
+          : `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"><path d="M8 0a8 8 0 108 8A8.009 8.009 0 008 0zM5.354 4.646a.5.5 0 10-.708.708L7.293 8l-2.647 2.646a.5.5 0 10.708.708L8 8.707l2.646 2.647a.5.5 0 10.708-.708L8.707 8l2.647-2.646a.5.5 0 10-.708-.708L8 7.293z"/></svg>`;
+
+        const meta = payload?.meta || {};
+        const links = payload?.links || {};
+        const acceptedISO = meta.accepted || '';
+        const acceptedDate = acceptedISO ? acceptedISO.slice(0,10) : '';
+        const filingDate = meta.filingDate || '';
+        const reportDate = meta.reportDate || '';
+        const company = meta.companyName || '';
+        const form = meta.form || '';
+        const cik = meta.cik || '';
+        const acc = meta.accessionDashed || '';
+
+        const htmlLink = links.htmlLink || '';
+        const filingDetailUrl = links.filingDetailUrl || '';
+        const originalLink = links.originalLink || '';
+
+        const detailsHtml = `
+          ${company || form ? `<div class="detail-item">
+            <span class="inline-actions">
+              ${company ? `<span class="badge">${company}</span>` : ``}
+              ${form ? `<span class="badge">Form: ${form}</span>` : ``}
+              ${cik ? `<span class="badge">CIK: ${cik}</span>` : ``}
+              ${acc ? `<span class="badge">Accession: ${acc}</span>` : ``}
+            </span>
+          </div>` : ''}
+
+          ${acceptedDate ? `<div class="detail-item"><strong>Published (EDGAR Accepted):</strong> ${acceptedISO}</div>` : ''}
+          ${filingDate ? `<div class="detail-item"><strong>Filing Date:</strong> ${filingDate}</div>` : ''}
+          ${reportDate ? `<div class="detail-item"><strong>Report Period End:</strong> ${reportDate}</div>` : ''}
+
+          ${originalLink ? `
+            <div class="detail-item">
+              <strong>Original Link:</strong>
+              <span class="inline-actions">
+                <a href="${originalLink}" target="_blank" rel="noopener" class="action-btn">Open Original</a>
+                <button class="copy-btn" onclick="copyToClipboard('${escapeForAttr(originalLink)}', this)">Copy</button>
+              </span>
+            </div>` : ''}
+
+          ${filingDetailUrl ? `
+            <div class="detail-item">
+              <strong>Filing Detail Page:</strong>
+              <span class="inline-actions">
+                <a href="${filingDetailUrl}" target="_blank" rel="noopener" class="action-btn">Open Filing Detail</a>
+                <button class="copy-btn" onclick="copyToClipboard('${escapeForAttr(filingDetailUrl)}', this)">Copy</button>
+              </span>
+            </div>` : ''}
+
+          ${htmlLink ? `
+            <div class="detail-item">
+              <strong>HTML Link:</strong>
+              <span class="inline-actions">
+                <a href="${htmlLink}" target="_blank" rel="noopener" class="action-btn">Open HTML (printable)</a>
+                <button class="copy-btn" onclick="copyToClipboard('${escapeForAttr(htmlLink)}', this)">Copy</button>
+                <button class="copy-btn" onclick="openAndAttemptPrint('${escapeForAttr(htmlLink)}')">Open &amp; Print to PDF</button>
+              </span>
+            </div>` : ''}
+        `;
+
+        const html = `
+          <div class="result-banner ${bannerClass}">
+            ${icon}<span>${payload.message || (isValid ? 'Valid' : 'Invalid')}</span>
+          </div>
+          <div class="result-details">${detailsHtml}</div>
+        `;
+
+        resultArea.className = `result-area ${status}`;
+        resultArea.innerHTML = html;
+      }
+    });
+
+    // Utilities
+    function copyToClipboard(text, btn){
+      navigator.clipboard.writeText(text).then(()=>{
+        const t = btn.textContent; btn.textContent='Copied!'; setTimeout(()=>btn.textContent=t,1200);
+      }).catch(()=>alert('Copy failed. You can copy manually.'));
+    }
+    function escapeForAttr(s){ return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+    // Best-effort print: opens HTML in a new tab and triggers print dialog.
+    function openAndAttemptPrint(url){
+      try{
+        const w = window.open(url, '_blank', 'noopener');
+        // We can’t access cross-origin DOM; calling print after a short delay works in many browsers.
+        setTimeout(()=>{ try{ w && w.print && w.print(); } catch(_){} }, 1500);
+      }catch(e){
+        alert('Could not open the print dialog automatically. Use the Open HTML button, then press Ctrl/Cmd+P to Save as PDF.');
+      }
+    }
+  </script>
+</body>
+</html>
