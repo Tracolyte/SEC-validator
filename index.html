@@ -88,7 +88,7 @@
       const entryTemplate = document.getElementById('document-entry-template');
 
       let documentCounter = 1;
-      const CUTOFF_DATE = new Date('2023-10-01T00:00:00Z'); // compare against Accepted (UTC)
+      const CUTOFF_DATE = new Date('2023-10-01T00:00:00Z');
 
       documentInputsContainer.addEventListener('click', (event) => {
         if (event.target.classList.contains('verify-btn')) {
@@ -131,14 +131,12 @@
         const { cik, accessionNoNoDashes, htmlDocUrl, filingDetailUrl } = parsed;
 
         try {
-          // NOTE: In browsers, setting the User-Agent header is forbidden.
           const paddedCik = cik.padStart(10, '0');
           const apiUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
           const resp = await fetch(apiUrl, { method: 'GET' });
           if (!resp.ok) throw new Error(`SEC API error ${resp.status}`);
           const data = await resp.json();
 
-          // Map recent arrays into objects for easier lookup
           const recent = data?.filings?.recent;
           if (!recent || !recent.accessionNumber) {
             throw new Error('Unexpected SEC API response structure.');
@@ -152,20 +150,18 @@
           }
 
           const form = recent.form[idx];
-          const accepted = recent.acceptanceDateTime?.[idx]; // e.g. "2024-11-07T13:02:51.000Z"
-          const filingDate = recent.filingDate?.[idx];      // e.g. "2024-11-07"
+          const accepted = recent.acceptanceDateTime?.[idx];
+          const filingDate = recent.filingDate?.[idx];
           const reportDate = recent.reportDate?.[idx] || '';
           const companyName = data.name;
           const accessionDashed = recent.accessionNumber[idx];
 
-          // Enforce 10-K / 10-Q only
           const is10KQ = form === '10-K' || form === '10-Q';
           if (!is10KQ) {
             showError(resultArea, `Form type is ${form}. Only 10-K and 10-Q are allowed.`);
             return resetBtn(verifyButton);
           }
 
-          // Use Accepted timestamp as Published date
           const acceptedDate = accepted ? new Date(accepted) : (filingDate ? new Date(filingDate + 'T00:00:00Z') : null);
           if (!acceptedDate) {
             showError(resultArea, 'Could not read the EDGAR “Accepted” timestamp for this filing.');
@@ -205,18 +201,15 @@
           const u = new URL(url);
           if (!/sec\.gov$/i.test(u.hostname)) return null;
 
-          // Accept both ix?doc=/Archives/... and direct /Archives/... links
           let archivesPath = '';
           if (u.pathname.includes('/ix')) {
             const docParam = u.searchParams.get('doc') || '';
             archivesPath = docParam;
           } else {
-            // e.g. https://www.sec.gov/Archives/edgar/data/.../doc.htm
             archivesPath = u.pathname;
           }
           if (!archivesPath.includes('/Archives/edgar/data/')) return null;
 
-          // Extract CIK and the no-dashes accession from the /data/<cik>/<accessionNoNoDashes>/...
           const m = archivesPath.match(/\/Archives\/edgar\/data\/(\d+)\/(\d{18})\//i);
           if (!m) return null;
 
@@ -313,7 +306,6 @@
       }
     });
 
-    // Utilities
     function copyToClipboard(text, btn){
       navigator.clipboard.writeText(text).then(()=>{
         const t = btn.textContent; btn.textContent='Copied!'; setTimeout(()=>btn.textContent=t,1200);
@@ -321,11 +313,9 @@
     }
     function escapeForAttr(s){ return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-    // Best-effort print: opens HTML in a new tab and triggers print dialog.
     function openAndAttemptPrint(url){
       try{
         const w = window.open(url, '_blank', 'noopener');
-        // We can’t access cross-origin DOM; calling print after a short delay works in many browsers.
         setTimeout(()=>{ try{ w && w.print && w.print(); } catch(_){} }, 1500);
       }catch(e){
         alert('Could not open the print dialog automatically. Use the Open HTML button, then press Ctrl/Cmd+P to Save as PDF.');
@@ -334,3 +324,4 @@
   </script>
 </body>
 </html>
+
